@@ -1,7 +1,7 @@
 <?php
 namespace Vicky\client\modules\Jira;
 
-class JiraToSlackBotConverter extends JiraConverter
+class JiraToSlackBotConverter extends JiraWebhookDataConverter
 {
     public function convert(JiraWebhookData $data)
     {

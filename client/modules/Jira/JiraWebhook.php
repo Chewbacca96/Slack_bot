@@ -2,59 +2,29 @@
 namespace Vicky\client\modules\Jira;
 
 use Vicky\client\exceptions\JiraWebhookException;
-use Vicky\client\exceptions\SlackBotSenderException;
 use League\Event\Emitter;
 
 class JiraWebhook
 {
-    private $rawData;
-    private $data;
-    protected $callbacks = [];
-
     private static $converter = [];
     private static $emitter;
-
-    /**
-     * Get raw data from JIRA and parsing it
-     *
-     * @return JiraWebhookData - parsed data
-     *
-     * @throws JiraWebhookException
-     * @throws SlackBotSenderException
-     */
-    public function extractData()
-    {
-        $f = fopen('php://input', 'r');
-        $data = stream_get_contents($f);
-
-        if ($data) {
-            $this->rawData = json_decode($data, true);
-
-            if ($this->rawData === null) {
-                throw new JiraWebhookException('This data cannot be decoded from json!');
-            }
-        } else {
-            throw new SlackBotSenderException('No data.');
-        }
-        
-        $this->data = JiraWebhookData::parseWebhookData($this->rawData);
-
-        return $this->data;
-    }
+    protected $callbacks = [];
+    private $rawData;
+    private $data;
 
     /**
      * Set converter for formatting messages
      *
      * @param $name - convertor name
-     * @param $converter - object that extend JiraConverter
+     * @param $converter - object that extend JiraWebhookDataConverter
      */
-    public static function setConverter($name, $converter)
+    public static function setConverter($name, JiraWebhookDataConverter $converter)
     {
         self::$converter[$name] = $converter;
     }
 
     /**
-     * Converts $data into message by converter
+     * Converts $data into message (string) by converter
      *
      * @param $name - convertor name
      * @param $data - instance of the class JiraWebhookData
@@ -63,12 +33,12 @@ class JiraWebhook
      *
      * @throws JiraWebhookException
      */
-    public static function convert($name, $data)
+    public static function convert($name, JiraWebhookData $data)
     {
-        if (!empty(self::$converter[$name] && is_subclass_of(self::$converter[$name], 'JiraConverter'))) {
+        if (!empty(self::$converter[$name])) {
             return self::$converter[$name]->convert($data);
         } else {
-            throw new JiraWebhookException("Converter {$name} is not registered or does not extend JiraConverter!");
+            throw new JiraWebhookException("Converter {$name} is not registered!");
         }
     }
 
@@ -79,11 +49,11 @@ class JiraWebhook
      */
     public static function getEmitter()
     {
-        if (self::$emitter) {
-            return self::$emitter;
+        if (!self::$emitter) {
+            self::$emitter = new Emitter();
         }
 
-        return self::$emitter = new Emitter();
+        return self::$emitter;
     }
 
     /**
@@ -93,20 +63,9 @@ class JiraWebhook
      * @param $listener - listener (it could be function or object (see docs))
      * @param int $priority - listener priority
      */
-    public function registerEvent($name, $listener, $priority = 0)
+    public function addListener($name, $listener, $priority = 0)
     {
         self::$emitter->addListener($name, $listener, $priority);
-    }
-
-    /**
-     * Call listener by event name
-     *
-     * @param $name - event name
-     * @param null $data
-     */
-    public function on($name, $data = null)
-    {
-        self::$emitter->emit($name, $data);
     }
 
     public function run()
@@ -116,7 +75,7 @@ class JiraWebhook
         if ($data->isBlocker()) {
             $this->on('priority.Blocker', $data);
         } else {
-            
+
         }
 
 
@@ -138,5 +97,44 @@ class JiraWebhook
                 $this->toChannel('#general', $message);
             }
         }
+    }
+
+    /**
+     * Get data from JIRA and parsing it
+     *
+     * @return JiraWebhookData - parsed data
+     *
+     * @throws JiraWebhookException
+     */
+    public function extractData()
+    {
+        $f = fopen('php://input', 'r');
+        $data = stream_get_contents($f);
+
+        if (!$data) {
+            throw new JiraWebhookException('There is not data in the Jira webhook');
+        }
+
+        $this->rawData = json_decode($data, true);
+        $jsonError = json_last_error();
+
+        if ($jsonError !== JSON_ERROR_NONE) {
+            throw new JiraWebhookException("This data cannot be decoded from json (decode error: $jsonError)!");
+        }
+
+        $this->data = JiraWebhookData::parseWebhookData($this->rawData);
+
+        return $this->data;
+    }
+
+    /**
+     * Call listener by event name
+     *
+     * @param $name - event name
+     * @param null $data
+     */
+    public function on($name, $data = null)
+    {
+        self::$emitter->emit($name, $data);
     }
 }
